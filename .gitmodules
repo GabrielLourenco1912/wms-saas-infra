@@ -1,3 +1,9 @@
 [submodule "wms-saas-backend"]
 	path = wms-saas-backend
 	url = git@github.com:GabrielLourenco1912/wms-saas-backend.git
+[submodule "wms-saas-web"]
+	path = wms-saas-web
+	url = git@github.com:GabrielLourenco1912/wms-saas-web.git
+[submodule "wms_saas_mobile"]
+	path = wms_saas_mobile
+	url = git@github.com:GabrielLourenco1912/wms-saas-mobile.git
