@@ -1,0 +1,81 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.jks
+*.keystore
+**/key.properties
+
+# IDEs and local tooling
+.idea/
+.vscode/
+.agents/
+.codex/
+.junie/
+*.iml
+*.ipr
+*.iws
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*~
+
+# Java / Maven
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+
+# Node.js / Next.js
+**/node_modules/
+**/.next/
+**/out/
+**/dist/
+**/coverage/
+**/.pnp
+**/.pnp.*
+**/.yarn/cache/
+**/.yarn/unplugged/
+**/.yarn/build-state.yml
+**/.yarn/install-state.gz
+**/.vercel/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Flutter / Dart
+wms_saas_mobile/.dart_tool/
+wms_saas_mobile/.flutter-plugins
+wms_saas_mobile/.flutter-plugins-dependencies
+wms_saas_mobile/.pub/
+wms_saas_mobile/.pub-cache/
+wms_saas_mobile/build/
+wms_saas_mobile/coverage/
+wms_saas_mobile/android/.gradle/
+wms_saas_mobile/android/.cxx/
+wms_saas_mobile/android/captures/
+wms_saas_mobile/android/local.properties
+wms_saas_mobile/**/Flutter/ephemeral/
+wms_saas_mobile/**/flutter/ephemeral/
+wms_saas_mobile/**/Pods/
+wms_saas_mobile/**/DerivedData/
+wms_saas_mobile/**/xcuserdata/
