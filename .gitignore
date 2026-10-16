@@ -13,6 +13,7 @@
 .vscode/
 .agents/
 .codex/
+.aws/
 .junie/
 *.iml
 *.ipr
@@ -23,6 +24,12 @@
 .settings/
 .springBeans
 .sts4-cache/
+
+# Artigo, modelos e documentos locais do TCC
+/docs-gerais/
+
+# Dumps gerados pelos scripts de backup
+/backups/
 
 # Operating system files
 .DS_Store
