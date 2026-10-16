@@ -81,6 +81,14 @@ Os guias de integração registram o que foi validado e os limites dos testes. H
 
 Na revisão da raiz em 15/10/2026, foram validados o Compose (padrões, portas alternativas, API externa e encaminhamento das 40 propriedades do backend), o build das duas imagens e um ambiente descartável com MySQL e Spring reais. O teste integrado confirmou migrations V1/V2, quatro gatilhos de proteção do histórico, primeiro gestor, envio/recebimento de código em um SMTP de teste, login pelo proxy, cookie HttpOnly, cadastro persistido, paginação 20, tamanho configurável, pesquisa, seletores de cinco itens, renovação rotativa e logout. Nenhum banco existente ou serviço de e-mail externo foi usado nessa verificação.
 
+## Identidade visual e documentação pública
+
+A marca **WMS SaaS — Gestão de armazéns** usa a direção “Precisão em movimento”, o símbolo W de percurso, Manrope/DM Mono e o crédito de Gabriel Lourenço com Monograma GL / 01. Web, mobile e e-mails compartilham esses elementos.
+
+No painel, `/documentacao` reúne as rotas públicas `/documentacao/api`, `/documentacao/modelo-relacional` e `/documentacao/branding`, acessíveis sem sessão. O guia de branding inclui paleta, tipografia, ícone, autoria e downloads.
+
+Os recursos utilizados são versionados em cada aplicação; builds não dependem dos materiais locais. Manutenção: [web](wms-saas-web/docs/IDENTIDADE_VISUAL.md), [mobile](wms_saas_mobile/docs/IDENTIDADE_VISUAL.md) e [e-mails](wms-saas-backend/docs/IDENTIDADE_EMAILS.md). Os originais e as apresentações ficam localmente em `docs-gerais/identidade-visual/`.
+
 ## Alterar e versionar
 
 Faça os commits de uma aplicação dentro do respectivo submódulo. Depois, registre sua nova referência no repositório principal com `git add <submódulo>` e um commit na raiz. Ao publicar, envie primeiro os commits dos submódulos e depois o commit principal, para que um novo clone consiga obter todas as referências.
