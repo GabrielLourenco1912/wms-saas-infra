@@ -28,16 +28,17 @@ Para o primeiro gestor, habilite `WMS_BOOTSTRAP_ENABLED`, preencha nome/e-mail/s
 | --- | --- | --- | --- |
 | Backend | `ghcr.io/gabriellourenco1912/wms-saas-backend:latest` | `wms-saas-backend/` | `docker/backend/Dockerfile` |
 | Web | `ghcr.io/gabriellourenco1912/wms-saas-web:latest` | `wms-saas-web/` | `docker/web/Dockerfile` |
+| Backup | `ghcr.io/gabriellourenco1912/wms-saas-mysql-backup:latest` | `docker/mysql-backup/` | `docker/mysql-backup/Dockerfile` |
 
-`GHCR_NAMESPACE` altera a conta/organização, em minúsculas, e `IMAGE_TAG` altera a tag de ambas as imagens.
+`GHCR_NAMESPACE` altera a conta/organização, em minúsculas, e `IMAGE_TAG` altera a tag das imagens.
 
-Os Dockerfiles separam compilação de execução, usam UID/GID `1001:1001` e incluem o rótulo OCI com o repositório de origem. O backend compila com Maven/Java 21 e executa no JRE 21. O web compila com Node 22 e executa o servidor Next.js standalone, com arquivos estáticos e `public` copiados para a imagem final. A saída standalone contém os arquivos necessários ao servidor, conforme a [documentação do Next.js](https://nextjs.org/docs/app/api-reference/config/next-config-js/output).
+Os Dockerfiles de backend e web separam compilação de execução, usam UID/GID `1001:1001` e incluem o rótulo OCI com o repositório de origem. O backend compila com Maven/Java 21 e executa no JRE 21. O web compila com Node 22 e executa o servidor Next.js standalone, com arquivos estáticos e `public` copiados para a imagem final. A saída standalone contém os arquivos necessários ao servidor, conforme a [documentação do Next.js](https://nextjs.org/docs/app/api-reference/config/next-config-js/output).
 
-Os `.dockerignore` ficam na raiz de cada contexto. Enviam apenas entradas de produção: POM e `src/main` no backend; código, arquivos de configuração, lockfile e `public` no web. Dependências locais, `.next`, `target`, testes Java, Git, IDEs, documentação e arquivos `.env` não entram no contexto. Dependências do build usam cache do BuildKit.
+Os `.dockerignore` ficam na raiz de cada contexto. Enviam apenas entradas de produção: POM e `src/main` no backend; código, arquivos de configuração, lockfile e `public` no web. Dependências locais, `.next`, `target`, testes Java, Git, IDEs, documentação e arquivos `.env` não entram no contexto. Dependências do build usam cache do BuildKit. O contexto do backup permite somente Dockerfile, script e crontab; a imagem contém clientes MySQL 8.0 e cron, executado como root dentro do container com filesystem somente para leitura e áreas graváveis restritas a `/backups`, `/tmp` e `/run`.
 
 ```bash
 docker compose config --quiet
-docker compose build backend web
+docker compose build backend web mysql-backup
 docker compose up -d --pull never
 ```
 
@@ -58,6 +59,7 @@ Para construir diretamente com a nomenclatura padrão:
 ```bash
 docker build -f docker/backend/Dockerfile -t ghcr.io/gabriellourenco1912/wms-saas-backend:latest wms-saas-backend
 docker build -f docker/web/Dockerfile -t ghcr.io/gabriellourenco1912/wms-saas-web:latest wms-saas-web
+docker build -t ghcr.io/gabriellourenco1912/wms-saas-mysql-backup:latest docker/mysql-backup
 ```
 
 ## GHCR: enviar e baixar
@@ -66,22 +68,22 @@ O GHCR aceita os nomes `ghcr.io/<conta-ou-organizacao>/<imagem>:<tag>`. Para env
 
 ```bash
 docker login ghcr.io -u GabrielLourenco1912
-docker compose build backend web
-docker compose push backend web
+docker compose build backend web mysql-backup
+docker compose push backend web mysql-backup
 ```
 
 Para executar imagens já publicadas, definir o namespace e a tag desejados no `.env`:
 
 ```bash
-docker compose pull backend web
+docker compose pull backend web mysql-backup
 docker compose up -d --no-build --pull never
 ```
 
-O envio ao GHCR é feito explicitamente pelo comando de push; o build local produz as duas imagens já com suas tags de registry.
+O build local produz as três imagens com suas tags de registry. Backend e web são enviados pelo comando de push. O workflow de backup testa a integração antes de publicar sua imagem; veja [mysql-backup/README.md](mysql-backup/README.md#testes-e-publicação).
 
 ## Dados e diagnóstico
 
-`docker compose down` encerra os serviços conservando o volume. A opção `-v` remove o volume e seus dados. Backup e restauração são tratados pelos [scripts do backend](../wms-saas-backend/README.md#backup-e-restauração); agendamento, monitoramento e armazenamento dos backups precisam ser configurados no ambiente de destino.
+`docker compose down` encerra os serviços conservando o volume. A opção `-v` remove o volume e seus dados. O serviço [mysql-backup](mysql-backup/README.md) agenda exportações diárias às 02h15 no fuso do host, retém ao menos 30 dias e permite restauração manual protegida. O bind mount padrão é `/var/backups/wms/mysql`; mantenha o serviço ativo e monitore os resultados. Implantação e cópia para armazenamento independente precisam ser configuradas no ambiente de destino.
 
 | Sintoma | Verificação |
 | --- | --- |

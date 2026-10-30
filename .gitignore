@@ -30,6 +30,8 @@
 
 # Dumps gerados pelos scripts de backup
 /backups/
+*.sql.gz
+*.partial
 
 # Operating system files
 .DS_Store

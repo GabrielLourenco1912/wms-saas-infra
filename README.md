@@ -40,7 +40,7 @@ Em uma instalação existente, preserve o `.env` e acrescente somente as opçõe
 
 ```bash
 docker compose config --quiet
-docker compose build backend web
+docker compose build backend web mysql-backup
 docker compose up -d --pull never
 docker compose ps
 ```
@@ -54,6 +54,20 @@ O Compose já injeta `WMS_API_BASE_URL=http://backend:<SERVER_PORT>` no web. Dei
 O banco usa o volume persistente `db_data`. As migrations foram consolidadas para desenvolvimento: se a base foi criada com versões antigas, siga a [orientação do backend](wms-saas-backend/README.md#banco-de-desenvolvimento) para provisionar uma base nova. O comando `docker compose down` conserva o volume; `docker compose down -v` exclui os dados.
 
 Consulte [docker/README.md](docker/README.md) para portas, imagens, configuração, diagnóstico e publicação no GHCR.
+
+## Backup e restauração
+
+O serviço `mysql-backup` agenda um dump completo diário às **02h15 no fuso do host**, com retenção mínima de **30 dias**. Os arquivos ficam em `/var/backups/wms/mysql` no host (configurável por `MYSQL_BACKUP_HOST_DIR`), com diretório `0700` e arquivos `0600`. Logs e nomes usam UTC.
+
+Após construir a imagem e iniciar o MySQL, valide a configuração e gere o primeiro backup:
+
+```bash
+docker compose run --rm --no-deps mysql-backup check
+docker compose run --rm --no-deps mysql-backup backup
+docker compose logs --since 48h mysql-backup
+```
+
+`check` não conecta ao banco. A restauração é manual e exige destino existente, vazio e diferente do banco operacional. Consulte [docker/mysql-backup/README.md](docker/mysql-backup/README.md) para credenciais, restauração, monitoramento, testes e publicação da imagem. O agendador precisa estar rodando no servidor; a implantação, o acompanhamento dos backups e a cópia para armazenamento independente são responsabilidades do ambiente.
 
 ## Executar o aplicativo mobile
 
@@ -73,7 +87,8 @@ Valide a configuração integrada na raiz com `docker compose config --quiet`. O
 
 | Diretório | Comandos |
 | --- | --- |
-| `wms-saas-backend` | `./mvnw verify` e `./ops/verify-backup.sh` (Docker necessário para a cobertura MySQL/backup) |
+| Raiz | `bash docker/mysql-backup/tests/integration.sh` (Docker; backup, restauração das migrations WMS, retenção e cron real) |
+| `wms-saas-backend` | `./mvnw verify` (Docker necessário para a cobertura MySQL) |
 | `wms-saas-web` | `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` |
 | `wms_saas_mobile` | `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug` |
 
