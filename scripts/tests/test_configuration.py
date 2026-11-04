@@ -1,0 +1,133 @@
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_script(name):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+renderer = load_script("render-deploy-env")
+reports = load_script("check-test-reports")
+
+
+class DeployConfigurationTest(unittest.TestCase):
+    def setUp(self):
+        self.variables = {
+            "MAIL_HOST": "smtp.example.test", "MAIL_FROM": "wms@example.test",
+            "CORS_ALLOWED_ORIGINS": "https://wms.example.test",
+        }
+        self.secrets = {"DB_PASSWORD": "test-password", "JWT_SECRET": "x" * 32}
+        self.images = {name: f"ghcr.io/example/{name.lower()}@sha256:{'a' * 64}"
+                       for name in renderer.IMAGE_NAMES}
+
+    def compose_config(self, content):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(content)
+            # Keep the developer's environment and real .env out of this check.
+            result = subprocess.run(
+                ["docker", "compose", "--env-file", str(env_file), "--project-name", "wms-ci-test",
+                 "-f", str(ROOT / "compose.deploy.yml"), "config", "--format", "json"],
+                env={name: os.environ[name] for name in ("PATH", "HOME") if name in os.environ},
+                text=True, capture_output=True,
+            )
+            if result.returncode:
+                self.fail(f"docker compose config falhou:\n{result.stderr.strip()}")
+        return json.loads(result.stdout)
+
+    def test_passwords_survive_compose_without_interpolation_or_execution(self):
+        values = [
+            'áé # $HOME ${DB_NAME} $$ \' " `tick` $(exit 7) \\path',
+            "quote\\'end", 'double\\"end', "line1\nline2\tend", "backslash\\",
+        ]
+        for value in values:
+            with self.subTest(value=value):
+                self.secrets["DB_PASSWORD"] = value
+                config = self.compose_config(renderer.render(self.variables, self.secrets, self.images))
+                # `compose config` escapes literal dollars for its reusable output.
+                self.assertEqual(value, config["services"]["backend"]["environment"]["DB_PASSWORD"].replace("$$", "$"))
+                self.assertEqual(value, config["services"]["mysql"]["environment"]["MYSQL_ROOT_PASSWORD"].replace("$$", "$"))
+                self.assertEqual(value, config["services"]["mysql-backup"]["environment"]["MYSQL_BACKUP_PASSWORD"].replace("$$", "$"))
+
+    def test_runtime_manifest_is_isolated_and_uses_pinned_images(self):
+        config = self.compose_config(renderer.render(self.variables, self.secrets, self.images))
+        for name, service in config["services"].items():
+            self.assertNotIn("build", service)
+            self.assertNotIn("container_name", service)
+            self.assertIn("healthcheck", service)
+            if name != "mysql":
+                self.assertIn("@sha256:", service["image"])
+        for name in ("backend", "web"):
+            self.assertEqual("127.0.0.1", config["services"][name]["ports"][0]["host_ip"])
+        self.assertNotIn("ports", config["services"]["mysql"])
+
+    def test_secrets_cannot_be_configured_as_vars(self):
+        self.variables["DB_PASSWORD"] = "wrong-place"
+        with self.assertRaisesRegex(ValueError, "Configure como secrets: DB_PASSWORD"):
+            renderer.render(self.variables, self.secrets, self.images)
+
+    def test_missing_secrets_and_unpinned_images_are_rejected(self):
+        for name in ("DB_PASSWORD", "JWT_SECRET"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                renderer.render(self.variables, {**self.secrets, name: ""}, self.images)
+        with self.assertRaises(ValueError):
+            renderer.render(self.variables, self.secrets, {**self.images, "BACKEND_IMAGE": "ghcr.io/a/b:latest"})
+
+    def test_schema_reset_and_incomplete_bootstrap_are_rejected(self):
+        for key, value in (("SPRING_JPA_HIBERNATE_DDL_AUTO", "create"),
+                           ("FLYWAY_BASELINE_ON_MIGRATE", "true"), ("WMS_BOOTSTRAP_ENABLED", "true")):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                renderer.render({**self.variables, key: value}, self.secrets, self.images)
+
+    def test_custom_ports_and_shared_database_credentials_are_forwarded(self):
+        self.variables.update(SERVER_PORT="8181", WEB_PORT="3333", BACKEND_PUBLISHED_PORT="18080",
+                              WEB_PUBLISHED_PORT="13000", MAIL_SMTP_AUTH="false")
+        self.secrets["DB_USERNAME"] = "application_user"
+        config = self.compose_config(renderer.render(self.variables, self.secrets, self.images))
+        backend = config["services"]["backend"]
+        environment = backend["environment"]
+        self.assertEqual(environment["DB_URL"], environment["SPRING_FLYWAY_URL"])
+        self.assertEqual(self.secrets["DB_USERNAME"], environment["SPRING_FLYWAY_USER"])
+        self.assertEqual(self.secrets["DB_PASSWORD"], environment["SPRING_FLYWAY_PASSWORD"])
+        backup = config["services"]["mysql-backup"]["environment"]
+        self.assertEqual(self.secrets["DB_USERNAME"], backup["MYSQL_BACKUP_USERNAME"])
+        self.assertEqual(self.secrets["DB_PASSWORD"], backup["MYSQL_BACKUP_PASSWORD"])
+        self.assertEqual("false", backend["environment"]["MAIL_SMTP_AUTH"])
+        self.assertEqual(8181, backend["ports"][0]["target"])
+        self.assertEqual("http://backend:8181", config["services"]["web"]["environment"]["WMS_API_BASE_URL"])
+
+    def test_explicit_api_url_is_forwarded(self):
+        self.variables.update(SERVER_PORT="8181", WMS_API_BASE_URL="https://api.example.test")
+        config = self.compose_config(renderer.render(self.variables, self.secrets, self.images))
+        self.assertEqual("https://api.example.test", config["services"]["web"]["environment"]["WMS_API_BASE_URL"])
+
+
+class TestReportGateTest(unittest.TestCase):
+    def test_empty_or_skipped_mysql_suites_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            with self.assertRaises(ValueError):
+                reports.check(path)
+            (path / "TEST-skipped.xml").write_text(
+                '<testsuite name="OutboundMySqlIntegrationTest" tests="1" skipped="1"/>')
+            with self.assertRaises(ValueError):
+                reports.check(path)
+            (path / "TEST-skipped.xml").write_text(
+                '<testsuite name="OutboundMySqlIntegrationTest" tests="0"/>')
+            with self.assertRaises(ValueError):
+                reports.check(path)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -45,6 +45,7 @@ Desktop.ini
 *.swp
 *.swo
 *.bak
+__pycache__/
 *~
 
 # Java / Maven

@@ -1,0 +1,172 @@
+# Production manifest: only pull and run; no source checkout or build on the host.
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no .env}
+      MYSQL_DATABASE: ${DB_NAME:-wms_saas}
+    expose:
+    - '3306'
+    volumes:
+    - db_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysql --host=127.0.0.1 --user=root --database="$${MYSQL_DATABASE}" --batch --skip-column-names --execute="SELECT 1"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  mysql-backup:
+    image: ${MYSQL_BACKUP_IMAGE:?Imagem GHCR com digest obrigatoria}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+    - no-new-privileges:true
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_BACKUP_DATABASE: ${DB_NAME:-wms_saas}
+      MYSQL_BACKUP_HOST: ${MYSQL_BACKUP_HOST:-mysql}
+      MYSQL_BACKUP_PORT: ${MYSQL_BACKUP_PORT:-3306}
+      MYSQL_BACKUP_USERNAME: ${MYSQL_BACKUP_USERNAME:-${DB_USERNAME:-root}}
+      MYSQL_BACKUP_PASSWORD: ${MYSQL_BACKUP_PASSWORD:-${DB_PASSWORD:?Defina DB_PASSWORD no .env}}
+      MYSQL_BACKUP_DIR: /backups
+      MYSQL_BACKUP_RETENTION_DAYS: ${MYSQL_BACKUP_RETENTION_DAYS:-30}
+      MYSQL_RESTORE_HOST: ${MYSQL_RESTORE_HOST:-}
+      MYSQL_RESTORE_PORT: ${MYSQL_RESTORE_PORT:-}
+      MYSQL_RESTORE_USERNAME: ${MYSQL_RESTORE_USERNAME:-}
+      MYSQL_RESTORE_PASSWORD: ${MYSQL_RESTORE_PASSWORD:-}
+    volumes:
+    - type: bind
+      source: ${MYSQL_BACKUP_HOST_DIR:-/var/backups/wms/mysql}
+      target: /backups
+      bind:
+        create_host_path: true
+    - type: bind
+      source: /etc/localtime
+      target: /etc/localtime
+      read_only: true
+    tmpfs:
+    - /tmp:mode=0700
+    - /run:mode=0755
+    stop_grace_period: 1m
+    healthcheck:
+      test: [CMD-SHELL, 'test -s /run/crond.pid && kill -0 $$(cat /run/crond.pid)']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  backend:
+    image: ${BACKEND_IMAGE:?Imagem GHCR com digest obrigatoria}
+    user: 1001:1001
+    expose:
+    - ${SERVER_PORT:-8080}
+    ports:
+    - ${PUBLISHED_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PUBLISHED_PORT:-8080}:${SERVER_PORT:-8080}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_APPLICATION_NAME: ${SPRING_APPLICATION_NAME:-wms-saas}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
+      DB_URL: ${DB_URL:-jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${DB_NAME:-wms_saas}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no .env}
+      SPRING_JPA_OPEN_IN_VIEW: ${SPRING_JPA_OPEN_IN_VIEW:-false}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO:-validate}
+      SPRING_JPA_SHOW_SQL: ${SPRING_JPA_SHOW_SQL:-false}
+      FLYWAY_BASELINE_ON_MIGRATE: ${FLYWAY_BASELINE_ON_MIGRATE:-false}
+      FLYWAY_BASELINE_VERSION: ${FLYWAY_BASELINE_VERSION:-1}
+      MAIL_HOST: ${MAIL_HOST:-localhost}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_STARTTLS_ENABLED: ${MAIL_STARTTLS_ENABLED:-false}
+      MAIL_CONNECTION_TIMEOUT: ${MAIL_CONNECTION_TIMEOUT:-5000}
+      MAIL_READ_TIMEOUT: ${MAIL_READ_TIMEOUT:-5000}
+      MAIL_WRITE_TIMEOUT: ${MAIL_WRITE_TIMEOUT:-5000}
+      FREEMARKER_TEMPLATE_LOADER_PATH: ${FREEMARKER_TEMPLATE_LOADER_PATH:-classpath:/templates/}
+      FREEMARKER_SUFFIX: ${FREEMARKER_SUFFIX:-.ftlh}
+      FREEMARKER_CHARSET: ${FREEMARKER_CHARSET:-UTF-8}
+      FREEMARKER_CHECK_TEMPLATE_LOCATION: ${FREEMARKER_CHECK_TEMPLATE_LOCATION:-true}
+      SPRING_MVC_PROBLEMDETAILS_ENABLED: ${SPRING_MVC_PROBLEMDETAILS_ENABLED:-false}
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@wms.local}
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET no .env (minimo de 32 bytes)}
+      JWT_ISSUER: ${JWT_ISSUER:-https://api.wmssaas.com}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      AUTH_CHALLENGE_TTL: ${AUTH_CHALLENGE_TTL:-10m}
+      AUTH_CHALLENGE_MAX_ATTEMPTS: ${AUTH_CHALLENGE_MAX_ATTEMPTS:-5}
+      ACCOUNT_LOCK_MAX_FAILED_ATTEMPTS: ${ACCOUNT_LOCK_MAX_FAILED_ATTEMPTS:-5}
+      ACCOUNT_LOCK_DURATION: ${ACCOUNT_LOCK_DURATION:-15m}
+      ACCOUNT_LOCK_UNLOCK_INTERVAL: ${ACCOUNT_LOCK_UNLOCK_INTERVAL:-60000}
+      ACCOUNT_LOCK_SCHEDULER_ENABLED: ${ACCOUNT_LOCK_SCHEDULER_ENABLED:-true}
+      WMS_BOOTSTRAP_ENABLED: ${WMS_BOOTSTRAP_ENABLED:-false}
+      WMS_BOOTSTRAP_NAME: ${WMS_BOOTSTRAP_NAME:-Gestor inicial}
+      WMS_BOOTSTRAP_EMAIL: ${WMS_BOOTSTRAP_EMAIL:-}
+      WMS_BOOTSTRAP_PASSWORD: ${WMS_BOOTSTRAP_PASSWORD:-}
+      SPRING_FLYWAY_URL: ${SPRING_FLYWAY_URL:-${DB_URL:-jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${DB_NAME:-wms_saas}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}}
+      SPRING_FLYWAY_USER: ${SPRING_FLYWAY_USER:-${DB_USERNAME:-root}}
+      SPRING_FLYWAY_PASSWORD: ${SPRING_FLYWAY_PASSWORD:-${DB_PASSWORD:?Defina DB_PASSWORD}}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    init: true
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test: [CMD-SHELL, 'curl --fail --silent --max-time 4 "http://127.0.0.1:$${SERVER_PORT}/health/ready" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+  web:
+    image: ${WEB_IMAGE:?Imagem GHCR com digest obrigatoria}
+    user: 1001:1001
+    expose:
+    - ${WEB_PORT:-3000}
+    ports:
+    - ${PUBLISHED_BIND_ADDRESS:-127.0.0.1}:${WEB_PUBLISHED_PORT:-3000}:${WEB_PORT:-3000}
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${WEB_PORT:-3000}
+      HOSTNAME: ${WEB_HOSTNAME:-0.0.0.0}
+      NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}
+      WMS_API_BASE_URL: ${WMS_API_BASE_URL:-http://backend:${SERVER_PORT:-8080}}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    init: true
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test: [CMD, node, -e, 'Promise.all([''http://127.0.0.1:'' + process.env.PORT + ''/auth/login'', process.env.WMS_API_BASE_URL + ''/health/ready''].map(url => fetch(url, {signal: AbortSignal.timeout(4000)}).then(r => {if (!r.ok) throw new Error(''unhealthy'')}))).catch(() => process.exit(1))']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+volumes:
+  db_data: null
