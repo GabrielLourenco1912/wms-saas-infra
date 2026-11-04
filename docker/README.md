@@ -1,5 +1,7 @@
 # Contêineres do WMS
 
+Para testes, publicação automática no GHCR e deploy por pull no Ubuntu, consulte [CI/CD](CI-CD.md). A produção usa `compose.deploy.yml`, sem build no host; o Compose abaixo continua disponível para desenvolvimento local. As entregas automáticas usam tags `main`/`develop` e `sha-<commit>`, com deploy por digest.
+
 Executar os comandos na raiz `TCC_WMS`, onde ficam `docker-compose.yml` e `.env`.
 
 ## Configuração
@@ -79,7 +81,7 @@ docker compose pull backend web mysql-backup
 docker compose up -d --no-build --pull never
 ```
 
-O build local produz as três imagens com suas tags de registry. Backend e web são enviados pelo comando de push. O workflow de backup testa a integração antes de publicar sua imagem; veja [mysql-backup/README.md](mysql-backup/README.md#testes-e-publicação).
+O build local produz as três imagens com suas tags de registry. O [CI/CD integrado](CI-CD.md) testa todas as aplicações e o backup antes de publicar as três imagens e fazer o deploy opcional por digest. Para baixar uma entrega do CI com o Compose de desenvolvimento, use `IMAGE_TAG=develop`, `main` ou `sha-<commit-da-raiz>` no `.env`.
 
 ## Dados e diagnóstico
 

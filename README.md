@@ -10,6 +10,12 @@ Sistema de gerenciamento de armazéns e distribuidores de pequeno e médio porte
 
 O navegador acessa o proxy `/api/backend` do Next.js; o Next.js chama o Spring pela rede interna do Docker. O aplicativo mobile chama diretamente a API publicada. O Spring mantém os dados no MySQL.
 
+## CI/CD
+
+O [workflow CI/CD](.github/workflows/ci-cd.yml) testa backend, web, mobile e backup em runners Ubuntu do GitHub. Depois dos testes, pushes em `develop`/`main` publicam as três imagens no GHCR. O deploy opcional por SSH usa [compose.deploy.yml](compose.deploy.yml), faz somente pull e execução no host e aguarda a prontidão dos serviços.
+
+O [guia de CI/CD](docker/CI-CD.md) lista todas as Variables e Secrets do GitHub, a preparação do servidor e os procedimentos de operação. O deploy começa desabilitado; habilite `DEPLOY_ENABLED` após configurar o environment `production`. As referências dos submódulos devem ser atualizadas e publicadas na raiz para entrar na entrega.
+
 ## Preparar o repositório
 
 Após clonar, inicialize os submódulos nas versões registradas pela raiz:

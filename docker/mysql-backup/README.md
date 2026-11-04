@@ -1,5 +1,7 @@
 # Backup MySQL do WMS
 
+O [CI/CD da infraestrutura](../CI-CD.md) executa esta suíte junto com os testes das três aplicações e só então publica as imagens. O workflow isolado de backup foi incorporado ao fluxo integrado.
+
 O serviço `mysql-backup` integra o Compose padrão e exporta o banco por TCP,
 usando clientes Oracle MySQL 8.0. O cron roda diariamente às **02h15 no fuso do
 host**, herdado de `/etc/localtime`; logs e nomes de arquivos usam UTC.
@@ -182,15 +184,15 @@ Um cron real roda com agenda temporária de um minuto; a produção é conferida
 separadamente como 02h15. Essa etapa pode aguardar até 75 segundos. O teste
 usa a mesma imagem e proteções de filesystem do serviço de produção.
 
-O [workflow](../../.github/workflows/mysql-backup.yml) testa em PRs e pushes para
-`main`, e publica **apenas a imagem de backup** no GHCR após aprovação dos testes
-em `main`, com tags `latest` e `sha-<commit>`. Submódulos privados exigem o secret
-`SUBMODULES_TOKEN` com leitura dos repositórios; a publicação usa `GITHUB_TOKEN`
-com `packages: write`. O pacote deve permitir acesso ao repositório publicador.
-Não há job de deploy. `GHCR_NAMESPACE` e `IMAGE_TAG` controlam a imagem usada
-pelo Compose, assim como as imagens da aplicação; tags `sha-*` exigem que as
-imagens dos demais serviços também existam com a tag escolhida, ou um override
-específico por serviço. O build local dispensa publicação no registry.
+O [workflow integrado](../../.github/workflows/ci-cd.yml) testa em PRs para
+`develop`/`main` e, em pushes nessas branches, publica as três imagens somente
+após os testes de todas as aplicações e do backup. As tags são `develop`/`main`
+e `sha-<commit-da-raiz>`. Submódulos privados usam `SUBMODULES_TOKEN` com leitura;
+o publish usa `GITHUB_TOKEN` com `packages: write`. O deploy opcional no Ubuntu
+usa imagens por digest e configuração de Variables/Secrets do GitHub, conforme
+o [guia de CI/CD](../CI-CD.md). No Compose de desenvolvimento, `GHCR_NAMESPACE`
+e `IMAGE_TAG` continuam selecionando as imagens; para baixar uma entrega do CI,
+use `IMAGE_TAG=develop` ou `main`. Build local dispensa publicação no registry.
 
 ## Limites de recuperação
 

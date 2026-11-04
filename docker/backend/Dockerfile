@@ -16,7 +16,10 @@ LABEL org.opencontainers.image.title="WMS SaaS Backend" \
 
 WORKDIR /var/www/html
 
-RUN groupadd --gid 1001 springuser \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1001 springuser \
     && useradd --uid 1001 --gid springuser --create-home springuser \
     && chown springuser:springuser /var/www/html
 

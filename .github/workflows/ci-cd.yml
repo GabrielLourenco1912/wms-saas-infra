@@ -1,0 +1,327 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize branch deliveries; only superseded PR runs may be cancelled.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  infrastructure:
+    name: Infraestrutura e scripts de deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validar Bash e cenários de deploy
+        run: |
+          for script in scripts/*.sh scripts/tests/*.sh docker/mysql-backup/mysql-backup docker/mysql-backup/tests/integration.sh; do
+            bash -n "$script"
+          done
+          shellcheck scripts/*.sh scripts/tests/*.sh
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          bash scripts/tests/test-deploy.sh
+
+  backend:
+    name: Backend (Java 21, H2 e MySQL real)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: wms-saas-backend/pom.xml
+      - name: Exigir Docker e executar todos os testes
+        working-directory: wms-saas-backend
+        run: |
+          docker info > /dev/null
+          ./mvnw -B -ntp clean verify
+      - name: Exigir relatórios sem testes ignorados e com cobertura MySQL
+        run: python3 scripts/check-test-reports.py
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: backend-test-reports
+          path: wms-saas-backend/target/surefire-reports/
+          retention-days: 7
+
+  web:
+    name: Web (lint, tipos, testes e navegador)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: wms-saas-web
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: wms-saas-web/package-lock.json
+      - name: Instalar dependências e Chromium
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Lint, tipos e testes
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+      - name: Build e testes de navegador da aplicação e documentação
+        env:
+          WMS_SCREENSHOT_DIR: ${{ runner.temp }}/web-screenshots
+          WMS_DOCS_SCREENSHOT_DIR: ${{ runner.temp }}/docs-screenshots
+        run: |
+          npm run build
+          npm run test:e2e
+          npm run test:docs
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: web-browser-screenshots
+          path: |
+            ${{ runner.temp }}/web-screenshots/
+            ${{ runner.temp }}/docs-screenshots/
+          retention-days: 7
+
+  mobile:
+    name: Mobile (análise, testes e APK debug)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: wms_saas_mobile
+    env:
+      MOBILE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL || 'https://api.wmssaas.com' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Instalar, analisar e testar
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Compilar APK para validação (sem assinatura de produção)
+        run: flutter build apk --debug --no-pub --dart-define="API_BASE_URL=$MOBILE_API_BASE_URL"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: mobile-debug-apk
+          path: wms_saas_mobile/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
+
+  backup:
+    name: Backup (MySQL, restauração, retenção e cron)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - run: bash docker/mysql-backup/tests/integration.sh
+
+  ci:
+    name: CI aprovado
+    if: always()
+    needs: [infrastructure, backend, web, mobile, backup]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Exigir sucesso em todas as aplicações e infraestrutura
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          failed = [name for name, job in results.items() if job['result'] != 'success']
+          if failed:
+              sys.exit('Verificações não aprovadas: ' + ', '.join(failed))
+          PY
+
+  publish:
+    name: Build e publicação das três imagens no GHCR
+    needs: ci
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend: ${{ steps.images.outputs.prefix }}/wms-saas-backend@${{ steps.backend.outputs.digest }}
+      web: ${{ steps.images.outputs.prefix }}/wms-saas-web@${{ steps.web.outputs.digest }}
+      backup: ${{ steps.images.outputs.prefix }}/wms-saas-mysql-backup@${{ steps.backup.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Definir namespace e tag da entrega
+        id: images
+        env:
+          NAMESPACE: ${{ vars.GHCR_NAMESPACE || github.repository_owner }}
+        run: |
+          namespace=${NAMESPACE,,}
+          [[ "$namespace" =~ ^[a-z0-9][a-z0-9-]*$ ]]
+          echo "prefix=ghcr.io/$namespace" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build e push do backend
+        id: backend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./wms-saas-backend
+          file: docker/backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.prefix }}/wms-saas-backend:sha-${{ github.sha }}
+            ${{ steps.images.outputs.prefix }}/wms-saas-backend:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=backend-${{ github.ref_name }}
+          cache-to: type=gha,scope=backend-${{ github.ref_name }},mode=max
+      - name: Build e push do web
+        id: web
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./wms-saas-web
+          file: docker/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.prefix }}/wms-saas-web:sha-${{ github.sha }}
+            ${{ steps.images.outputs.prefix }}/wms-saas-web:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=web-${{ github.ref_name }}
+          cache-to: type=gha,scope=web-${{ github.ref_name }},mode=max
+      - name: Build e push do backup
+        id: backup
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./docker/mysql-backup
+          file: docker/mysql-backup/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.prefix }}/wms-saas-mysql-backup:sha-${{ github.sha }}
+            ${{ steps.images.outputs.prefix }}/wms-saas-mysql-backup:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=backup-${{ github.ref_name }}
+          cache-to: type=gha,scope=backup-${{ github.ref_name }},mode=max
+      - name: Registrar imagens publicadas
+        env:
+          PREFIX: ${{ steps.images.outputs.prefix }}
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          BACKUP_DIGEST: ${{ steps.backup.outputs.digest }}
+        run: |
+          printf '### Imagens publicadas\n\n- %s/wms-saas-backend@%s\n- %s/wms-saas-web@%s\n- %s/wms-saas-mysql-backup@%s\n' \
+            "$PREFIX" "$BACKEND_DIGEST" "$PREFIX" "$WEB_DIGEST" "$PREFIX" "$BACKUP_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Pull e atualização no Ubuntu
+    needs: publish
+    if: vars.DEPLOY_ENABLED == 'true' && github.ref_name == (vars.DEPLOY_BRANCH || 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: wms-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Preparar configuração privada fora do contexto de build
+        env:
+          DEPLOY_VARS_JSON: ${{ toJSON(vars) }}
+          BACKEND_IMAGE: ${{ needs.publish.outputs.backend }}
+          WEB_IMAGE: ${{ needs.publish.outputs.web }}
+          MYSQL_BACKUP_IMAGE: ${{ needs.publish.outputs.backup }}
+          WMS_SECRET_DB_URL: ${{ secrets.DB_URL }}
+          WMS_SECRET_DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          WMS_SECRET_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          WMS_SECRET_JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          WMS_SECRET_MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          WMS_SECRET_MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          WMS_SECRET_WMS_BOOTSTRAP_EMAIL: ${{ secrets.WMS_BOOTSTRAP_EMAIL }}
+          WMS_SECRET_WMS_BOOTSTRAP_PASSWORD: ${{ secrets.WMS_BOOTSTRAP_PASSWORD }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/deploy-bundle"
+          python3 scripts/render-deploy-env.py "$RUNNER_TEMP/deploy-bundle/.env"
+          install -m 600 compose.deploy.yml "$RUNNER_TEMP/deploy-bundle/compose.deploy.yml"
+          install -m 700 scripts/remote-deploy.sh "$RUNNER_TEMP/deploy-bundle/remote-deploy.sh"
+      - name: Transferir pacote por SSH e executar pull/up no host
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/wms-saas' }}
+          DEPLOY_PROJECT_NAME: ${{ vars.DEPLOY_PROJECT_NAME || 'wms-saas' }}
+          DEPLOY_WAIT_TIMEOUT: ${{ vars.DEPLOY_WAIT_TIMEOUT || '240' }}
+          DEPLOY_RELEASE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: bash scripts/send-deploy.sh "$RUNNER_TEMP/deploy-bundle"
+      - name: Remover configuração privada do runner
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/deploy-bundle"
