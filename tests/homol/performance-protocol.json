@@ -2,7 +2,11 @@
   "version": 1,
   "definedBeforeExecution": "2026-11-06",
   "scope": "Controlled synthetic workload on the isolated homologation API; not a production capacity claim",
-  "waveOrderCounts": [10, 50, 200],
+  "waveOrderCounts": [
+    10,
+    50,
+    200
+  ],
   "itemsPerOrder": 1,
   "repetitionsPerCount": 10,
   "waveP95LimitMs": 5000,
@@ -10,6 +14,25 @@
   "operationalIterationsPerPhase": 60,
   "reason": "An interactive planning budget of five seconds for up to the API limit of 200 orders; two seconds is a separate HTTP responsiveness guardrail. RNF004 still requires complete rendered mobile feedback.",
   "concurrency": "One manager generates fresh waves while two distinct operators confirm fresh receipts in the same warehouse. Compare an initial phase without waves to a phase with waves.",
-  "assertions": ["Every command succeeds", "Each iteration uses new documents and idempotency keys", "Reservations do not exceed demand or physical stock", "Report all durations and failures, including maximum"],
-  "limitations": ["Synthetic data", "One item per order", "One host topology", "Sequential phases retain prior ledger history", "Percentiles describe the observed sample, without population-level guarantees"]
+  "assertions": [
+    "Every command succeeds",
+    "Each iteration uses new documents and idempotency keys",
+    "Reservations do not exceed demand or physical stock",
+    "Report all durations and failures, including maximum"
+  ],
+  "limitations": [
+    "Synthetic data",
+    "One item per order",
+    "One host topology",
+    "Sequential phases retain prior ledger history",
+    "Percentiles describe the observed sample, without population-level guarantees"
+  ],
+  "resourceLimits": {
+    "backendCpus": 1.0,
+    "backendMemory": "1g",
+    "mysqlCpus": 0.5,
+    "mysqlMemory": "768m",
+    "webCpus": 0.5,
+    "webMemory": "384m"
+  }
 }
