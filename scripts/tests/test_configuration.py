@@ -28,6 +28,8 @@ class DeployConfigurationTest(unittest.TestCase):
         self.variables = {
             "MAIL_HOST": "smtp.example.test", "MAIL_FROM": "wms@example.test",
             "CORS_ALLOWED_ORIGINS": "https://wms.example.test",
+            # General configuration tests do not provision an initial account.
+            "WMS_BOOTSTRAP_ENABLED": "false",
         }
         self.secrets = {"DB_PASSWORD": "test-password", "JWT_SECRET": "x" * 32}
         self.images = {name: f"ghcr.io/example/{name.lower()}@sha256:{'a' * 64}"
@@ -148,11 +150,36 @@ class DeployConfigurationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             renderer.render(self.variables, self.secrets, {**self.images, "BACKEND_IMAGE": "ghcr.io/a/b:latest"})
 
-    def test_schema_reset_and_incomplete_bootstrap_are_rejected(self):
+    def test_schema_reset_is_rejected(self):
         for key, value in (("SPRING_JPA_HIBERNATE_DDL_AUTO", "create"),
-                           ("FLYWAY_BASELINE_ON_MIGRATE", "true"), ("WMS_BOOTSTRAP_ENABLED", "true")):
+                           ("FLYWAY_BASELINE_ON_MIGRATE", "true")):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 renderer.render({**self.variables, key: value}, self.secrets, self.images)
+
+    def test_enabled_bootstrap_requires_both_credentials(self):
+        self.variables["WMS_BOOTSTRAP_ENABLED"] = "true"
+        credentials = {"WMS_BOOTSTRAP_EMAIL": "bootstrap@example.test",
+                       "WMS_BOOTSTRAP_PASSWORD": "bootstrap-test-password"}
+        for missing in (tuple(credentials), ("WMS_BOOTSTRAP_EMAIL",), ("WMS_BOOTSTRAP_PASSWORD",)):
+            with self.subTest(missing=missing):
+                secrets = {**self.secrets, **credentials, **{name: "" for name in missing}}
+                with self.assertRaisesRegex(ValueError, "Bootstrap exige WMS_BOOTSTRAP_EMAIL e WMS_BOOTSTRAP_PASSWORD"):
+                    renderer.render(self.variables, secrets, self.images)
+
+    def test_cli_forwards_bootstrap_credentials_without_logging_them(self):
+        self.variables["WMS_BOOTSTRAP_ENABLED"] = "true"
+        self.secrets.update(WMS_BOOTSTRAP_EMAIL="bootstrap@example.test",
+                            WMS_BOOTSTRAP_PASSWORD="bootstrap-test-password")
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / ".env"
+            result = self.run_renderer(destination)
+            self.assertEqual(0, result.returncode, result.stderr)
+            config = self.compose_config(destination.read_text(encoding="utf-8"))
+        environment = config["services"]["backend"]["environment"]
+        self.assertEqual("true", environment["WMS_BOOTSTRAP_ENABLED"])
+        for name in ("WMS_BOOTSTRAP_EMAIL", "WMS_BOOTSTRAP_PASSWORD"):
+            self.assertEqual(self.secrets[name], environment[name])
+            self.assertNotIn(self.secrets[name], result.stdout + result.stderr)
 
     def test_custom_ports_and_shared_database_credentials_are_forwarded(self):
         self.variables.update(SERVER_PORT="8181", WEB_PORT="3333", BACKEND_PUBLISHED_PORT="18080",
