@@ -181,6 +181,8 @@ jobs:
       HOMOL_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/homol/ci
       HOMOL_ANDROID_DEVICE: emulator-5554
       PYTHON: ${{ github.workspace }}/.homol-private/tools/bin/python
+      ANDROID_USER_HOME: ${{ github.workspace }}/.homol-private/android
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.homol-private/android/avd
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -214,7 +216,10 @@ jobs:
           done
           command -v sdkmanager
           sdkmanager 'emulator' 'platform-tools' 'system-images;android-34;google_apis;x86_64'
-          echo no | avdmanager create avd --force --name homol --package 'system-images;android-34;google_apis;x86_64'
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name homol --path "$ANDROID_AVD_HOME/homol.avd" --package 'system-images;android-34;google_apis;x86_64'
+          test -s "$ANDROID_AVD_HOME/homol.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           sudo apt-get install -y libxkbcommon-x11-0 libxcb-cursor0 libpulse0 libnss3 libglu1-mesa
           sudo chmod a+rw /dev/kvm
           adb start-server
