@@ -14,11 +14,11 @@ As propriedades do `wms-saas-backend/src/main/resources/application.yaml` usam v
 
 Configurar `MAIL_HOST` com um servidor SMTP acessível pelo contêiner. `localhost` dentro de um contêiner aponta para o próprio contêiner. Não há serviço SMTP neste Compose. A autenticação depende do envio de códigos de uso único; configure host, porta, remetente, autenticação e TLS antes de testar o login.
 
-`SERVER_PORT` controla a porta interna do backend e `BACKEND_PUBLISHED_PORT` sua publicação no host. `WEB_PORT` controla a porta interna do Next.js e `WEB_PUBLISHED_PORT` sua publicação no host. Se mudar a origem web, atualizar também `CORS_ALLOWED_ORIGINS`. `REFRESH_COOKIE_SECURE=false` permite o fluxo web durante desenvolvimento em HTTP.
+`SERVER_PORT` controla a porta interna do backend e `BACKEND_PUBLISHED_PORT` sua publicação no host. `WEB_PORT` controla a porta interna do Next.js e `WEB_PUBLISHED_PORT` sua publicação no host. Se mudar a origem web, atualizar `WEB_ORIGIN` e `CORS_ALLOWED_ORIGINS`. `REFRESH_COOKIE_SECURE=false` permite o fluxo web durante desenvolvimento em HTTP.
 
 O serviço web recebe `WMS_API_BASE_URL` em execução. Vazio ou ausente, o valor é calculado como `http://backend:<SERVER_PORT>`; uma URL explícita tem precedência e deve apontar à origem da API acessível pelo contêiner, sem `/api` no final. A porta publicada no host não altera esse endereço interno. O navegador usa `/api/backend` na origem do próprio painel, e o proxy Next.js encaminha a chamada para o Spring. O Compose principal já faz a integração; o override de exemplo do submódulo web é opcional e fixa a porta da API em 8080.
 
-Atrás de um proxy reverso HTTPS, preserve o cabeçalho `Host` original e encaminhe corretamente `X-Forwarded-Proto`, pois o painel confere a origem das mutações. Mantenha `REFRESH_COOKIE_SECURE=true` nesse ambiente.
+`WEB_ORIGIN` define a origem pública do painel, como `https://wms.lourencogabriel.dev`, sem caminho, query ou fragmento. O Next.js compara o `Origin` das mutações com essa configuração, independentemente do endereço HTTP e da porta internos do contêiner. No Compose local, o padrão é `http://localhost:<WEB_PUBLISHED_PORT>`; no deploy, o gerador fornece `https://wms.lourencogabriel.dev`, substituível pela variável do environment `production`. Mantenha `REFRESH_COOKIE_SECURE=true` ao publicar por HTTPS.
 
 A configuração não faz baseline automático de bancos existentes: `FLYWAY_BASELINE_ON_MIGRATE=false` continua sendo o padrão. As migrations foram consolidadas para desenvolvimento; bancos das versões anteriores exigem uma base nova e vazia, conforme a seção [Banco de desenvolvimento](../wms-saas-backend/README.md#banco-de-desenvolvimento). Não use baseline para pular a criação das tabelas.
 
@@ -90,6 +90,8 @@ O build local produz as três imagens com suas tags de registry. O [CI/CD integr
 | Sintoma | Verificação |
 | --- | --- |
 | Web retorna 503 ao chamar `/api/backend/...` | Confira `WMS_API_BASE_URL`, a porta interna `SERVER_PORT`, os logs e `/health/ready`; o web não deve usar `localhost` para acessar outro contêiner. |
+| Mutação retorna 403 por origem inválida | Confira se `WEB_ORIGIN` corresponde ao protocolo, domínio e porta públicos usados no navegador. |
+| Mutação retorna 503 por origem pública não configurada | Defina `WEB_ORIGIN` no ambiente do Next.js com uma origem HTTP(S), sem credenciais, caminho, query ou fragmento. |
 | Login não envia código | Confira SMTP e logs do backend; o servidor precisa ser alcançável de dentro do contêiner. |
 | Sessão se perde ao recarregar em HTTP | Use `REFRESH_COOKIE_SECURE=false` no desenvolvimento local e refaça o login. |
 | MySQL permanece sem saúde após alterar o `.env` | Confira as credenciais e a base realmente existentes no volume. As variáveis de inicialização não alteram um banco já criado. |

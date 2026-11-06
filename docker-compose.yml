@@ -142,6 +142,7 @@ services:
       PORT: "${WEB_PORT:-3000}"
       HOSTNAME: "${WEB_HOSTNAME:-0.0.0.0}"
       NEXT_TELEMETRY_DISABLED: "${NEXT_TELEMETRY_DISABLED:-1}"
+      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:${WEB_PUBLISHED_PORT:-3000}}"
       WMS_API_BASE_URL: "${WMS_API_BASE_URL:-http://backend:${SERVER_PORT:-8080}}"
     restart: on-failure
 

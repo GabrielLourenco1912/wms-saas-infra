@@ -79,14 +79,14 @@ class DeployConfigurationTest(unittest.TestCase):
                     else:
                         self.assertFalse(target.exists())
 
-    def compose_config(self, content):
+    def compose_config(self, content, manifest="compose.deploy.yml"):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text(content)
             # Keep the developer's environment and real .env out of this check.
             result = subprocess.run(
                 ["docker", "compose", "--env-file", str(env_file), "--project-name", "wms-ci-test",
-                 "-f", str(ROOT / "compose.deploy.yml"), "config", "--format", "json"],
+                 "-f", str(ROOT / manifest), "config", "--format", "json"],
                 env={name: os.environ[name] for name in ("PATH", "HOME") if name in os.environ},
                 text=True, capture_output=True,
             )
@@ -119,6 +119,22 @@ class DeployConfigurationTest(unittest.TestCase):
         for name in ("backend", "web"):
             self.assertEqual("127.0.0.1", config["services"][name]["ports"][0]["host_ip"])
         self.assertNotIn("ports", config["services"]["mysql"])
+        self.assertEqual("https://wms.lourencogabriel.dev",
+                         config["services"]["web"]["environment"]["WEB_ORIGIN"])
+
+    def test_public_web_origin_and_private_api_share_the_docker_network(self):
+        self.variables.update(WEB_ORIGIN="https://wms.example.test:8443", SERVER_PORT="8181",
+                              WEB_PORT="3333", WEB_PUBLISHED_PORT="13000")
+        content = renderer.render(self.variables, self.secrets, self.images)
+        for manifest in ("compose.deploy.yml", "docker-compose.yml"):
+            with self.subTest(manifest=manifest):
+                config = self.compose_config(content, manifest)
+                web = config["services"]["web"]
+                backend = config["services"]["backend"]
+                self.assertEqual("https://wms.example.test:8443", web["environment"]["WEB_ORIGIN"])
+                self.assertEqual("http://backend:8181", web["environment"]["WMS_API_BASE_URL"])
+                self.assertIn("default", web["networks"])
+                self.assertIn("default", backend["networks"])
 
     def test_secrets_cannot_be_configured_as_vars(self):
         self.variables["DB_PASSWORD"] = "wrong-place"

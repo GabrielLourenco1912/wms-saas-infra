@@ -44,6 +44,7 @@ Use texto sem aspas externas ou sintaxe de shell. Os padrões completos estão e
 | `PUBLISHED_BIND_ADDRESS` | `127.0.0.1`, para usar o reverse proxy do host. |
 | `BACKEND_PUBLISHED_PORT`, `WEB_PUBLISHED_PORT` | `8080`, `3000`; escolha portas livres ou já pertencentes ao projeto WMS. |
 | `SERVER_PORT`, `WEB_PORT`, `WEB_HOSTNAME` | `8080`, `3000`, `0.0.0.0`: portas/endereço internos. |
+| `WEB_ORIGIN` | `https://wms.lourencogabriel.dev`; origem pública do painel usada na proteção CSRF, com protocolo e porta pública quando necessário. Sem caminho, query ou fragmento. Independente de `WEB_PORT`. |
 | `WMS_API_BASE_URL` | Vazio calcula `http://backend:<SERVER_PORT>`. API externa: URL acessível pelo web, sem `/api` final. |
 | `MAIL_HOST`, `MAIL_FROM`, `CORS_ALLOWED_ORIGINS` | **Obrigatórios**: SMTP acessível pelo backend, remetente e origens HTTPS do cliente separadas por vírgulas. |
 | `MAIL_PORT`, `MAIL_SMTP_AUTH`, `MAIL_STARTTLS_ENABLED` | Padrões de deploy: `587`, `true`, `true`. Ajuste ao provedor; os padrões locais são diferentes. |
@@ -94,7 +95,7 @@ Instale a chave pública dedicada e confira a identidade SSH por um canal confi�
 
 Mantenha `DEPLOY_PROJECT_NAME` estável. Para adotar uma instalação WMS existente, use o projeto Compose atual (`docker compose ls`) e preserve `<projeto>_db_data`, senha, JWT e caminho de backups. Outro nome de projeto cria um banco novo. O manifest de deploy remove nomes globais de containers e acrescenta healthchecks; revise a primeira transição e faça backup antes.
 
-Aponte o proxy HTTPS do host para `127.0.0.1:<WEB_PUBLISHED_PORT>` e, para o mobile, para `127.0.0.1:<BACKEND_PUBLISHED_PORT>`. Configure as URLs correspondentes em `CORS_ALLOWED_ORIGINS` e `MOBILE_API_BASE_URL`. O MySQL não publica porta no host.
+Aponte o proxy HTTPS do host para `127.0.0.1:<WEB_PUBLISHED_PORT>` e, para o mobile, para `127.0.0.1:<BACKEND_PUBLISHED_PORT>`. Configure as URLs correspondentes em `WEB_ORIGIN`, `CORS_ALLOWED_ORIGINS` e `MOBILE_API_BASE_URL`. Deixe `WMS_API_BASE_URL` vazio para o Next.js acessar `http://backend:<SERVER_PORT>` pela rede interna do Compose. O MySQL não publica porta no host.
 
 Depois, defina `DEPLOY_ENABLED=true`, escolha `DEPLOY_BRANCH` e faça push ou use **Actions → CI/CD → Run workflow** nessa branch. Para revisar esta entrega em `develop` sem implantar, deixe `DEPLOY_ENABLED` ausente/`false`. A interface de execução manual exige que o workflow também esteja na branch padrão do GitHub.
 

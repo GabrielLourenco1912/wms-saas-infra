@@ -40,6 +40,7 @@ Edite `.env` antes de continuar:
 - Preencha `DB_PASSWORD` e `JWT_SECRET`. Gere o segredo JWT com `openssl rand -hex 32`.
 - Configure `MAIL_HOST`, `MAIL_PORT`, `MAIL_FROM` e as credenciais/TLS exigidos pelo seu SMTP. O Compose não inclui um servidor de e-mail; `localhost` dentro do backend identifica o próprio contêiner.
 - Para acessar o painel por HTTP local, defina `REFRESH_COOKIE_SECURE=false`. Em HTTPS, mantenha `true`.
+- Configure `WEB_ORIGIN` com a origem do painel no navegador, incluindo protocolo e porta pública quando necessário. O exemplo usa `http://localhost:3000`; em produção, use a URL HTTPS pública.
 - Para uma base nova sem gestor, habilite `WMS_BOOTSTRAP_ENABLED=true` e preencha `WMS_BOOTSTRAP_NAME`, `WMS_BOOTSTRAP_EMAIL` e `WMS_BOOTSTRAP_PASSWORD`. Após provisionar, desabilite o bootstrap e remova a senha de provisionamento do `.env`.
 
 Em uma instalação existente, preserve o `.env` e acrescente somente as opções necessárias a partir do exemplo.
