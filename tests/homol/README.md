@@ -13,6 +13,8 @@ execução. Preparação, isolamento, portas, SMTP, métricas e ensaio manual es
 - `waves.k6.js`: mede baseline e concorrência com dois operadores e um gestor.
 - `analyze-benchmark.mjs`: exporta dados individuais e verifica reservas/demanda.
 - `write-manifest.py`: registra revisões, ambiente e hashes das evidências.
+- `report.py`: gera HTML portátil e CSV de feedback a partir das evidências
+  sanitizadas; `--plots` acrescenta gráficos PNG/PDF com matplotlib.
 
 Não use scraping como substituto de asserções: o Playwright interage com controles
 reais, o Flutter percorre as telas e a API comprova estado e livro razão. A

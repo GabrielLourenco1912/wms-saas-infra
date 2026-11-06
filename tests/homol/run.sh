@@ -60,5 +60,7 @@ for phase in baseline concurrent; do
     fi
 done
 node tests/homol/analyze-benchmark.mjs
+"$python" tests/homol/write-manifest.py
+"$python" tests/homol/report.py "$HOMOL_ARTIFACT_DIR"
 if [[ "$benchmark_result" != 0 ]]; then exit "$benchmark_result"; fi
 printf 'Ciclo web/Android, cenários de API e benchmark aprovados.\n'

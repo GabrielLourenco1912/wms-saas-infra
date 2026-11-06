@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "definedBeforeManualExecution": "2026-11-06",
+  "scope": "Android físico, APK profile de homologação, rede estável e dados exclusivamente sintéticos",
+  "inputGroups": ["camera_decoded", "keyboard_code_complete"],
+  "samplesPerInput": {"confirmed": 20, "rejected": 10},
+  "start": "Último código completo aceito no campo; para digitação/HID, enviar a ação de término do teclado",
+  "end": "Primeiro quadro com confirmação ou rejeição retornada pela API",
+  "includes": "Espera entre a última leitura e o toque de confirmação; preencher os outros dados antes da leitura final",
+  "excludes": "Tempo de enquadramento/foco antes de decodificar a etiqueta",
+  "criterionMs": 2000,
+  "comparison": "Cada amostra observada deve ser inferior a 2000 ms; relatar também falhas, mediana, p95 e máximo por entrada e resultado",
+  "requiredMetadata": ["modelo", "versão Android", "APK e hash", "data/hora", "tipo e estabilidade da rede", "operação", "entrada", "resultado", "amostra"],
+  "cameraChecks": ["autorizar", "recusar e continuar digitando", "cancelar preserva texto", "pausar/retomar", "uma etiqueta não duplica comando", "zeros iniciais preservados", "código incorreto é rejeitado sem mutação"],
+  "limitations": "Não comprova ergonomia industrial, leitura por scanner físico ou SLA de produção. Informar operações e condições efetivamente ensaiadas."
+}
