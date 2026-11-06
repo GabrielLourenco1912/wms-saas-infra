@@ -215,13 +215,17 @@ jobs:
           command -v sdkmanager
           sdkmanager 'emulator' 'platform-tools' 'system-images;android-34;google_apis;x86_64'
           echo no | avdmanager create avd --force --name homol --package 'system-images;android-34;google_apis;x86_64'
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-cursor0 libpulse0 libnss3 libglu1-mesa
           sudo chmod a+rw /dev/kvm
-          "$ANDROID_HOME/emulator/emulator" -avd homol -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
-          for _attempt in {1..120}; do
-            if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; then exit 0; fi
+          adb start-server
+          "$ANDROID_HOME/emulator/emulator" -avd homol -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          for _attempt in {1..150}; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+            if [[ "$(timeout 5s adb -s "$HOMOL_ANDROID_DEVICE" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 ]]; then exit 0; fi
             sleep 2
           done
+          cat "$RUNNER_TEMP/emulator.log"
           exit 1
       - name: Executar aceitação e medições em ambiente descartável
         run: bash tests/homol/run.sh
@@ -231,6 +235,12 @@ jobs:
           name: homol-acceptance-evidence
           path: ${{ env.HOMOL_ARTIFACT_DIR }}/
           retention-days: 30
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: homol-emulator-diagnostics
+          path: ${{ runner.temp }}/emulator.log
+          retention-days: 7
 
   ci:
     name: CI aprovado

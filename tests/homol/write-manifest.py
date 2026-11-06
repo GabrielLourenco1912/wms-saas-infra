@@ -18,6 +18,8 @@ working_trees = {name: command("git", "-C", str(root / path), "status", "--porce
 files = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.is_file() and p.name != "manifest.json"}
 data = {"createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(), "runId": os.environ.get("HOMOL_RUN_ID"),
         "revisions": revisions, "workingTrees": working_trees, "system": platform.platform(), "cpuCount": os.cpu_count(),
+        "osRelease": platform.freedesktop_os_release().get("PRETTY_NAME", ""),
+        "memoryBytes": os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"),
         "node": command("node", "--version"), "docker": command("docker", "version", "--format", "{{.Server.Version}}"),
         "androidDevice": os.environ.get("HOMOL_ANDROID_DEVICE", "emulator-5580"),
         "scope": "Synthetic controlled acceptance. Physical camera, gloves, scanner peripherals and production availability are not inferred.",
