@@ -2,9 +2,9 @@ name: CI/CD
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, homol]
   push:
-    branches: [main]
+    branches: [main, homol]
   workflow_dispatch:
 
 permissions:
@@ -30,10 +30,10 @@ jobs:
           persist-credentials: false
       - name: Validar Bash e cenários de deploy
         run: |
-          for script in scripts/*.sh scripts/tests/*.sh docker/mysql-backup/mysql-backup docker/mysql-backup/tests/integration.sh; do
+          for script in scripts/*.sh scripts/tests/*.sh tests/homol/*.sh docker/mysql-backup/mysql-backup docker/mysql-backup/tests/integration.sh; do
             bash -n "$script"
           done
-          shellcheck scripts/*.sh scripts/tests/*.sh
+          shellcheck scripts/*.sh scripts/tests/*.sh tests/homol/*.sh
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
           bash scripts/tests/test-deploy.sh
 
@@ -121,7 +121,7 @@ jobs:
       run:
         working-directory: wms_saas_mobile
     env:
-      MOBILE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL || 'https://api.wmssaas.com' }}
+      MOBILE_API_BASE_URL: ${{ github.ref_name == 'homol' && 'https://homol.api.wms.lourencogabriel.dev' || vars.MOBILE_API_BASE_URL || 'https://api.wms.lourencogabriel.dev' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -143,12 +143,22 @@ jobs:
           flutter analyze --no-pub
           flutter test --no-pub
       - name: Compilar APK para validação (sem assinatura de produção)
-        run: flutter build apk --debug --no-pub --dart-define="API_BASE_URL=$MOBILE_API_BASE_URL"
+        run: flutter build apk --debug --no-pub --dart-define="API_BASE_URL=$MOBILE_API_BASE_URL" --dart-define=CAPTURE_FEEDBACK_METRICS=${{ github.ref_name == 'homol' }}
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mobile-debug-apk
           path: wms_saas_mobile/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7
+
+      - name: Compilar APK profile para ensaio manual em homologação
+        if: github.ref_name == 'homol'
+        run: flutter build apk --profile --no-pub --dart-define="API_BASE_URL=$MOBILE_API_BASE_URL" --dart-define=CAPTURE_FEEDBACK_METRICS=true
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: github.ref_name == 'homol'
+        with:
+          name: mobile-homol-profile-apk
+          path: wms_saas_mobile/build/app/outputs/flutter-apk/app-profile.apk
+          retention-days: 30
 
   backup:
     name: Backup (MySQL, restauração, retenção e cron)
@@ -162,21 +172,75 @@ jobs:
           persist-credentials: false
       - run: bash docker/mysql-backup/tests/integration.sh
 
+  homol-acceptance:
+    name: Homologação real (web, Flutter Android, API e MySQL)
+    if: github.ref_name == 'homol' || github.base_ref == 'homol'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      HOMOL_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/homol/ci
+      HOMOL_ANDROID_DEVICE: emulator-5554
+      PYTHON: ${{ github.workspace }}/.homol-private/tools/bin/python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+      - name: Preparar ferramentas e emulador Android 34
+        run: |
+          python3 -m venv .homol-private/tools
+          "$PYTHON" -m pip install bcrypt==4.3.0
+          npm --prefix wms-saas-web ci --no-audit --no-fund
+          (cd wms-saas-web && npx playwright install --with-deps chromium)
+          sdkmanager 'system-images;android-34;google_apis;x86_64'
+          echo no | avdmanager create avd --force --name homol --package 'system-images;android-34;google_apis;x86_64'
+          sudo chmod a+rw /dev/kvm
+          "$ANDROID_HOME/emulator/emulator" -avd homol -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb wait-for-device
+          for _attempt in {1..120}; do
+            if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Executar aceitação e medições em ambiente descartável
+        run: bash tests/homol/run.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: homol-acceptance-evidence
+          path: ${{ env.HOMOL_ARTIFACT_DIR }}/
+          retention-days: 30
+
   ci:
     name: CI aprovado
     if: always()
-    needs: [infrastructure, backend, web, mobile, backup]
+    needs: [infrastructure, backend, web, mobile, backup, homol-acceptance]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Exigir sucesso em todas as aplicações e infraestrutura
         env:
           RESULTS: ${{ toJSON(needs) }}
+          HOMOL_REQUIRED: ${{ github.ref_name == 'homol' || github.base_ref == 'homol' }}
         run: |
           python3 - <<'PY'
           import json, os, sys
           results = json.loads(os.environ['RESULTS'])
-          failed = [name for name, job in results.items() if job['result'] != 'success']
+          failed = [name for name, job in results.items() if job['result'] != 'success'
+                    and not (name == 'homol-acceptance' and job['result'] == 'skipped'
+                             and os.environ['HOMOL_REQUIRED'] == 'false')]
           if failed:
               sys.exit('Verificações não aprovadas: ' + ', '.join(failed))
           PY
@@ -184,7 +248,7 @@ jobs:
   publish:
     name: Build e publicação das três imagens no GHCR
     needs: ci
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/homol' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -275,12 +339,12 @@ jobs:
   deploy:
     name: Pull e atualização no Ubuntu
     needs: publish
-    if: vars.DEPLOY_ENABLED == 'true' && github.ref_name == (vars.DEPLOY_BRANCH || 'main')
+    if: (github.ref_name == 'homol' && vars.HOMOL_DEPLOY_ENABLED == 'true') || (github.ref_name == 'main' && vars.DEPLOY_ENABLED == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: production
+    environment: ${{ github.ref_name == 'homol' && 'homologation' || 'production' }}
     concurrency:
-      group: wms-production-deploy
+      group: ${{ github.ref_name == 'homol' && 'wms-homol-deploy' || 'wms-production-deploy' }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -292,6 +356,7 @@ jobs:
       - name: Preparar configuração privada fora do contexto de build
         env:
           DEPLOY_VARS_JSON: ${{ toJSON(vars) }}
+          WMS_DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'homol' && 'homol' || 'production' }}
           BACKEND_IMAGE: ${{ needs.publish.outputs.backend }}
           WEB_IMAGE: ${{ needs.publish.outputs.web }}
           MYSQL_BACKUP_IMAGE: ${{ needs.publish.outputs.backup }}
@@ -303,18 +368,22 @@ jobs:
           WMS_SECRET_MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
           WMS_SECRET_WMS_BOOTSTRAP_EMAIL: ${{ secrets.WMS_BOOTSTRAP_EMAIL }}
           WMS_SECRET_WMS_BOOTSTRAP_PASSWORD: ${{ secrets.WMS_BOOTSTRAP_PASSWORD }}
+          WMS_SECRET_HOMOL_MANAGER_PASSWORD_HASH: ${{ secrets.HOMOL_MANAGER_PASSWORD_HASH }}
+          WMS_SECRET_HOMOL_OPERATOR_PASSWORD_HASH: ${{ secrets.HOMOL_OPERATOR_PASSWORD_HASH }}
         run: |
           install -d -m 700 "$RUNNER_TEMP/deploy-bundle"
           python3 scripts/render-deploy-env.py "$RUNNER_TEMP/deploy-bundle/.env"
-          install -m 600 compose.deploy.yml "$RUNNER_TEMP/deploy-bundle/compose.deploy.yml"
+          manifest=compose.deploy.yml
+          if [[ "$WMS_DEPLOY_ENVIRONMENT" == homol ]]; then manifest=compose.homol.yml; fi
+          install -m 600 "$manifest" "$RUNNER_TEMP/deploy-bundle/compose.deploy.yml"
           install -m 700 scripts/remote-deploy.sh "$RUNNER_TEMP/deploy-bundle/remote-deploy.sh"
       - name: Transferir pacote por SSH e executar pull/up no host
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/wms-saas' }}
-          DEPLOY_PROJECT_NAME: ${{ vars.DEPLOY_PROJECT_NAME || 'wms-saas' }}
+          DEPLOY_DIR: ${{ github.ref_name == 'homol' && '/var/www/wms-saas-homol' || vars.DEPLOY_DIR || '/opt/wms-saas' }}
+          DEPLOY_PROJECT_NAME: ${{ github.ref_name == 'homol' && 'wms-saas-homol' || vars.DEPLOY_PROJECT_NAME || 'wms-saas' }}
           DEPLOY_WAIT_TIMEOUT: ${{ vars.DEPLOY_WAIT_TIMEOUT || '240' }}
           DEPLOY_RELEASE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}

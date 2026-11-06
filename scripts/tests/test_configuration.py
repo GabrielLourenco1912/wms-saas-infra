@@ -204,6 +204,37 @@ class DeployConfigurationTest(unittest.TestCase):
         self.assertEqual("https://api.example.test", config["services"]["web"]["environment"]["WMS_API_BASE_URL"])
 
 
+class HomologationIsolationTest(unittest.TestCase):
+    compose_config = DeployConfigurationTest.compose_config
+    def setUp(self):
+        DeployConfigurationTest.setUp(self)
+        self.secrets.update({name: "$2b$12$" + "a" * 53 for name in renderer.HOMOL_SECRET_NAMES})
+
+    def test_homol_ignores_production_ports_origins_database_and_mail_settings(self):
+        self.variables.update(WEB_ORIGIN="https://production.invalid", DB_NAME="production",
+                              WEB_PUBLISHED_PORT="3000", BACKEND_PUBLISHED_PORT="8080",
+                              MAIL_HOST="production.invalid")
+        content = renderer.render(self.variables, self.secrets, self.images, "homol")
+        config = self.compose_config(content, "compose.homol.yml")
+        services = config["services"]
+        self.assertEqual(3333, int(services["web"]["ports"][0]["published"]))
+        self.assertEqual(8888, int(services["backend"]["ports"][0]["published"]))
+        self.assertEqual("127.0.0.1", services["backend"]["ports"][0]["host_ip"])
+        self.assertNotIn("ports", services["mysql"])
+        self.assertEqual("wms_saas_homol", services["mysql"]["environment"]["MYSQL_DATABASE"])
+        self.assertEqual("homol", services["backend"]["environment"]["SPRING_PROFILES_ACTIVE"])
+        self.assertEqual("mailpit", services["backend"]["environment"]["MAIL_HOST"])
+        self.assertEqual("https://homol.wms.lourencogabriel.dev", services["web"]["environment"]["WEB_ORIGIN"])
+        self.assertIn("/var/backups/wms-homol/mysql", content)
+
+    def test_homol_refuses_external_database_and_missing_seed_hashes(self):
+        with self.assertRaises(ValueError):
+            renderer.render(self.variables, {**self.secrets, "DB_URL": "jdbc:mysql://prod/wms_saas"}, self.images, "homol")
+        for name in renderer.HOMOL_SECRET_NAMES:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                renderer.render(self.variables, {**self.secrets, name: ""}, self.images, "homol")
+
+
 class TestReportGateTest(unittest.TestCase):
     def test_empty_or_skipped_mysql_suites_fail(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -42,15 +42,43 @@ SECRET_DEFAULTS = {
     "MYSQL_BACKUP_USERNAME": "", "MYSQL_BACKUP_PASSWORD": "",
     "MYSQL_RESTORE_USERNAME": "", "MYSQL_RESTORE_PASSWORD": "",
 }
+HOMOL_SECRET_NAMES = ("HOMOL_MANAGER_PASSWORD_HASH", "HOMOL_OPERATOR_PASSWORD_HASH")
+HOMOL_DEFAULTS = {
+    "SPRING_PROFILES_ACTIVE": "homol",
+    "PUBLISHED_BIND_ADDRESS": "127.0.0.1",
+    "BACKEND_PUBLISHED_PORT": "8888", "WEB_PUBLISHED_PORT": "3333",
+    "DB_HOST": "mysql", "DB_PORT": "3306", "DB_NAME": "wms_saas_homol", "DB_URL": "",
+    "WEB_ORIGIN": "https://homol.wms.lourencogabriel.dev", "WMS_API_BASE_URL": "",
+    "JWT_ISSUER": "https://homol.api.wms.lourencogabriel.dev",
+    "CORS_ALLOWED_ORIGINS": "https://homol.wms.lourencogabriel.dev",
+    "MAIL_HOST": "mailpit", "MAIL_PORT": "1025", "MAIL_FROM": "homol@wms.local",
+    "MAIL_SMTP_AUTH": "false", "MAIL_STARTTLS_ENABLED": "false",
+    "MAIL_USERNAME": "", "MAIL_PASSWORD": "", "WMS_BOOTSTRAP_ENABLED": "false",
+    "WMS_BOOTSTRAP_EMAIL": "", "WMS_BOOTSTRAP_PASSWORD": "",
+    "MYSQL_BACKUP_HOST_DIR": "/var/backups/wms-homol/mysql",
+    "MYSQL_BACKUP_HOST": "mysql", "MYSQL_BACKUP_PORT": "3306",
+    "MYSQL_RESTORE_HOST": "", "MYSQL_RESTORE_PORT": "",
+}
 IMAGE_NAMES = ("BACKEND_IMAGE", "WEB_IMAGE", "MYSQL_BACKUP_IMAGE")
 
 
-def render(variables: dict, secrets: dict, images: dict) -> str:
-    misplaced = set(variables) & SECRET_DEFAULTS.keys()
+def render(variables: dict, secrets: dict, images: dict, environment: str = "production") -> str:
+    if environment not in ("production", "homol"):
+        raise ValueError("Ambiente de deploy inválido")
+    misplaced = set(variables) & (SECRET_DEFAULTS.keys() | set(HOMOL_SECRET_NAMES))
     if misplaced:
         raise ValueError("Configure como secrets: " + ", ".join(sorted(misplaced)))
     settings = {name: str(variables.get(name) or default) for name, default in DEFAULTS.items()}
     settings.update({name: secrets.get(name) or default for name, default in SECRET_DEFAULTS.items()})
+    if environment == "homol":
+        if secrets.get("DB_URL"):
+            raise ValueError("Homologação não aceita DB_URL externo")
+        settings.update(HOMOL_DEFAULTS)
+        for name in HOMOL_SECRET_NAMES:
+            value = secrets.get(name, "")
+            if not re.fullmatch(r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}", value):
+                raise ValueError(f"Homologação exige hash BCrypt: {name}")
+            settings[name] = value
     for name in ("DB_PASSWORD", "JWT_SECRET", "MAIL_HOST", "MAIL_FROM", "CORS_ALLOWED_ORIGINS"):
         if not settings[name].strip():
             raise ValueError(f"Configuração obrigatória ausente: {name}")
@@ -78,9 +106,9 @@ def render(variables: dict, secrets: dict, images: dict) -> str:
 
 def main() -> None:
     variables = json.loads(os.environ.get("DEPLOY_VARS_JSON", "{}"))
-    secrets = {name: os.environ.get(f"WMS_SECRET_{name}", "") for name in SECRET_DEFAULTS}
+    secrets = {name: os.environ.get(f"WMS_SECRET_{name}", "") for name in (*SECRET_DEFAULTS, *HOMOL_SECRET_NAMES)}
     images = {name: os.environ.get(name, "") for name in IMAGE_NAMES}
-    content = render(variables, secrets, images)
+    content = render(variables, secrets, images, os.environ.get("WMS_DEPLOY_ENVIRONMENT", "production"))
     destination = Path(sys.argv[1])
     # Create a private, new file; refuse to follow an existing symlink.
     with open(destination, "x", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:

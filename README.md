@@ -10,6 +10,10 @@ Sistema de gerenciamento de armazéns e distribuidores de pequeno e médio porte
 
 O navegador acessa o proxy `/api/backend` do Next.js; o Next.js chama o Spring pela rede interna do Docker. O aplicativo mobile chama diretamente a API publicada. O Spring mantém os dados no MySQL.
 
+## Homologação e aceitação
+
+A branch `homol` mantém o ambiente de testes separado de produção: web em `127.0.0.1:3333`, API em `127.0.0.1:8888`, banco/volume próprios, Mailpit interno, migration sintética protegida e deploy em `/var/www/wms-saas-homol`. O [guia de homologação](docker/HOMOLOGACAO.md) descreve o CI, a aceitação Playwright/Flutter, as medições e as verificações manuais.
+
 ## CI/CD
 
 O [workflow CI/CD](.github/workflows/ci-cd.yml) testa backend, web, mobile e backup em runners Ubuntu do GitHub. Depois dos testes, pushes em `develop`/`main` publicam as três imagens no GHCR. O deploy opcional por SSH usa [compose.deploy.yml](compose.deploy.yml), faz somente pull e execução no host e aguarda a prontidão dos serviços.

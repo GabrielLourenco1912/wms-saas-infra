@@ -12,6 +12,8 @@ def check(directory: Path) -> None:
         raise ValueError("Nenhum relatório Surefire encontrado")
     suites = [ET.parse(report).getroot() for report in reports]
     required = {"OutboundMySqlIntegrationTest", "TokenServiceConcurrencyIntegrationTest"}
+    if (directory.parent.parent / "src/test/java/dev/lourencogabriel/wmssaas/homol/HomologationMigrationIntegrationTest.java").exists():
+        required.add("HomologationMigrationIntegrationTest")
     executed = set()
     total = 0
     for suite in suites:
@@ -23,7 +25,7 @@ def check(directory: Path) -> None:
             executed.add(name)
             total += tests
     if required - executed:
-        raise ValueError("Os dois testes MySQL precisam executar com Docker")
+        raise ValueError("As suítes MySQL precisam executar com Docker: " + ", ".join(sorted(required - executed)))
     print(f"{total} testes aprovados, incluindo MySQL, sem testes ignorados.")
 
 

@@ -36,11 +36,22 @@ docker compose version
 docker login ghcr.io --username "$registry_user" --password-stdin >/dev/null
 "${compose[@]}" config --quiet
 
+extra_services=()
+if "${compose[@]}" config --services | grep -qx mailpit; then
+    extra_services=(mailpit)
+fi
+
 # Complete every pull and the offline backup preflight before replacing services.
 "${compose[@]}" pull backend web mysql-backup
 "${compose[@]}" pull --policy missing mysql
+if (( ${#extra_services[@]} )); then
+    "${compose[@]}" pull "${extra_services[@]}"
+fi
 "${compose[@]}" run --rm --no-deps -T mysql-backup check
 "${compose[@]}" up --detach --no-build --pull never --no-recreate --wait --wait-timeout 180 mysql
+if (( ${#extra_services[@]} )); then
+    "${compose[@]}" up --detach --no-build --pull never --no-deps --wait "${extra_services[@]}"
+fi
 # --no-deps keeps the existing database container/configuration intact.
 "${compose[@]}" up --detach --no-build --pull never --no-deps --wait --wait-timeout "$wait_timeout" backend web mysql-backup
 
