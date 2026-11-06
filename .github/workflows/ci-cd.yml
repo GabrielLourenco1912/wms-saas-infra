@@ -200,6 +200,9 @@ jobs:
         with:
           flutter-version: '3.41.9'
           cache: true
+          # This job creates private container directories; avoid a post-job
+          # recursive hashFiles scan of them when saving the pub cache.
+          pub-cache: 'false'
       - name: Preparar ferramentas e emulador Android 34
         run: |
           python3 -m venv .homol-private/tools
